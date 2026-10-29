@@ -4,6 +4,7 @@
  * 싱글톤이라 앱 전체에서 이 인스턴스 하나를 공유한다.
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { CreateCatDto } from './dto/create-cat.dto.js';
 
 export interface Cat {
   name: string;
@@ -14,13 +15,16 @@ export interface Cat {
 export class CatsService {
   private readonly cats: Cat[] = [];
 
-  create(cat: Cat) {
+  create(dto: CreateCatDto): Cat {
+    const cat: Cat = { name: dto.name, age: dto.age };
     this.cats.push(cat);
     return cat;
   }
 
   findAll(age?: number) {
-    return age ? this.cats.filter((c) => c.age === age) : this.cats;
+    return age !== undefined
+      ? this.cats.filter((c) => c.age === age)
+      : this.cats;
   }
 
   findOne(id: number) {
