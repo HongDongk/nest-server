@@ -4,8 +4,17 @@
  *   GET  /cats/:id     → 하나 조회
  *   POST /cats         → 새로 추가 (JSON 본문)
  * 직접 데이터를 다루지 않고 CatsService에 일을 넘긴다.
+ * 잘못된 입력은 BadRequestException(400)을 던진다 → HttpExceptionFilter가 응답 모양을 통일.
  */
-import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { CatsService, type Cat } from './cats.service.js';
 
 @Controller('cats')
@@ -19,11 +28,19 @@ export class CatsController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.catsService.findOne(Number(id)) ?? { message: '없음' };
+    const n = Number(id);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new BadRequestException('id는 0 이상의 정수여야 합니다'); // → 400
+    }
+    return this.catsService.findOne(n); // 없으면 서비스에서 404를 던진다
   }
 
   @Post()
   create(@Body() cat: Cat) {
+    if (!cat?.name || typeof cat.age !== 'number') {
+      // 간단한 수동 검증. 나중에 Pipes 장에서 DTO + ValidationPipe로 대체할 예정
+      throw new BadRequestException('name(문자열)과 age(숫자)가 필요합니다');
+    }
     return this.catsService.create(cat);
   }
 }

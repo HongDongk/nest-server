@@ -1,7 +1,7 @@
 # nest-server — NestJS 학습 노트
 
 NestJS 공식 문서(한국어 번역: https://nestjs.burt.pe.kr)를 따라가며 실습한 프로젝트입니다.
-지금까지 다룬 장: **Controllers → Providers → Modules → Middleware**
+지금까지 다룬 장: **Controllers → Providers → Modules → Middleware → Exception filters**
 
 ---
 
@@ -15,11 +15,14 @@ NestJS 공식 문서(한국어 번역: https://nestjs.burt.pe.kr)를 따라가�
 | **Controller** | 주문 받는 직원 | "어떤 주소로 어떤 요청이 오면 무엇을 돌려줄지" 결정 |
 | **Provider (Service)** | 주방장 | 실제 로직 처리 (데이터 저장/조회 등) |
 | **Module** | 부서 (한식 코너, 양식 코너) | 관련된 컨트롤러·서비스를 한 묶음으로 관리 |
+| **Exception filter** | 고객 불만 처리 창구 | 어디서 문제가 터지든 손님에게 나가는 안내(에러 응답)를 한 형식으로 통일 |
 
 요청이 흘러가는 순서:
 
 ```
 요청 → [Middleware] → [Controller] → [Service] → 응답
+                          ↓ 어디서든 throw
+                   [Exception filter] → 에러 응답
 ```
 
 ---
@@ -124,6 +127,66 @@ export class AppModule implements NestModule {
 
 ---
 
+## 5. Exception filters — 에러 응답 처리
+
+**에러가 나면 `throw`만 하면 된다.** Nest가 잡아서 알맞은 HTTP 응답으로 바꿔준다.
+처리되지 않은 일반 에러는 `500 Internal server error`가 된다.
+
+### 내장 HTTP 예외
+
+| 예외 클래스 | 상태코드 | 언제 |
+|---|---|---|
+| `BadRequestException` | 400 | 입력값이 잘못됨 |
+| `UnauthorizedException` | 401 | 로그인 안 됨 |
+| `ForbiddenException` | 403 | 권한 없음 |
+| `NotFoundException` | 404 | 대상이 없음 |
+| `ConflictException` | 409 | 중복 등 충돌 |
+| `HttpException(메시지, 상태코드)` | 직접 지정 | 위에 없는 경우 |
+
+```ts
+throw new NotFoundException(`id ${id}번 고양이가 없습니다`);
+// → { "statusCode": 404, "message": "id 9번 고양이가 없습니다", "error": "Not Found" }
+```
+
+- 직접 예외 클래스를 만들 땐 `HttpException`을 **상속** (`class CatNotFound extends NotFoundException {}`)
+
+### 예외 필터 — 에러 응답 모양을 내 마음대로
+
+`@Catch(잡을 예외)` + `ExceptionFilter`의 `catch(exception, host)` 구현.
+
+```ts
+@Catch(HttpException) // @Catch() 처럼 비우면 모든 예외를 잡음
+export class HttpExceptionFilter implements ExceptionFilter {
+  catch(exception: HttpException, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();          // HTTP 요청의 req/res 꺼내기
+    const res = ctx.getResponse<Response>();
+    res.status(exception.getStatus()).json({ success: false, ... });
+  }
+}
+```
+
+### 적용 범위
+
+| 방법 | 범위 |
+|---|---|
+| 메서드에 `@UseFilters(HttpExceptionFilter)` | 그 핸들러 하나 |
+| 컨트롤러 클래스에 `@UseFilters(...)` | 그 컨트롤러 전체 |
+| `main.ts`의 `app.useGlobalFilters(new ...)` | 전역 (DI 불가) |
+| 모듈 providers에 `{ provide: APP_FILTER, useClass: ... }` | 전역 (DI 가능) ← **이 프로젝트 방식** |
+
+- `@UseFilters()`에는 인스턴스(`new X()`) 대신 **클래스**를 넘기는 걸 권장 (Nest가 재사용, DI 가능)
+
+### 이 프로젝트에서 실제 응답
+
+```bash
+curl localhost:3000/cats/9
+# {"success":false,"statusCode":404,"message":"id 9번 고양이가 없습니다","path":"/cats/9","timestamp":"..."}
+curl localhost:3000/cats/abc
+# {"success":false,"statusCode":400,"message":"id는 0 이상의 정수여야 합니다",...}
+```
+
+---
+
 ## 프로젝트 구조
 
 ```
@@ -133,8 +196,10 @@ src/
 ├── app.controller.ts           # GET / → "Hello World!"
 ├── app.service.ts              # AppController가 쓰는 서비스
 ├── common/
-│   └── middleware/
-│       └── logger.middleware.ts  # 모든 요청 로그 (메서드, 주소, 상태코드, 시간)
+│   ├── middleware/
+│   │   └── logger.middleware.ts    # 모든 요청 로그 (메서드, 주소, 상태코드, 시간)
+│   └── filters/
+│       └── http-exception.filter.ts # 에러 응답 모양 통일 (전역 적용)
 └── cats/
     ├── cats.module.ts          # Cats 기능 모듈
     ├── cats.controller.ts      # /cats 요청 처리
@@ -186,7 +251,7 @@ GET 요청은 브라우저 주소창에 `http://localhost:3000/cats`를 입력�
 
 ## 다음에 볼 것
 
-- [ ] Exception filters — 에러 응답 모양 만들기
+- [x] Exception filters — 에러 응답 모양 만들기
 - [ ] Pipes — 입력값 변환/검증 (DTO + `ValidationPipe`)
 - [ ] Guards — 인증/권한
 - [ ] Interceptors — 응답 가공, 실행 시간 측정
